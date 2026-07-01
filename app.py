@@ -7,16 +7,24 @@ import re
 import pandas as pd
 import io
 
-# --- STREAMLIT FELÜLET BEÁLLÍTÁSA ---
-st.set_page_config(page_title="Telekom Számlafeldolgozó", layout="wide")
-st.title("📄 Telekom Számlafeldolgozó")
-st.write("Töltsd fel a digitális Telekom PDF számlát, majd kattints a feldolgozás gombra!")
+# --- STREAMLIT FELÜLET BEÁLLÍTÁSA (Középre zárt elrendezés) ---
+st.set_page_config(page_title="Telekom Számlafeldolgozó", layout="centered")
+
+# Szövegek középre igazítása HTML formázással
+st.markdown("<h1 style='text-align: center;'>📄 Telekom Számlafeldolgozó</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Töltsd fel a digitális Telekom PDF számlát, majd kattints a feldolgozás gombra!</p>", unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True) # Egy kis térköz
 
 # Fájlfeltöltő modul
 uploaded_file = st.file_uploader("Telekom számla feltöltése (PDF)", type=["pdf"])
 
 if uploaded_file is not None:
-    if st.button("🚀 Számla feldolgozása"):
+    # A gomb középre igazítása oszlopok segítségével
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        start_button = st.button("🚀 Számla feldolgozása", use_container_width=True)
+
+    if start_button:
         with st.spinner("Számla feldolgozása folyamatban..."):
             time_start = time.time() # időmérés kezdete
             
@@ -50,19 +58,15 @@ if uploaded_file is not None:
             for i in range(len(sorok)):
                 sor = sorok[i].strip()
 
-                # --- FŐCIKLUS VÉDELME ---
                 if "mennyiség" in sor or "egység" in sor or "Szolgáltatás TESZOR" in sor:
                     continue
                 
-                # 1. LÉPÉS: Aktuális hívószám beállítása
                 if "Mobil hívószám" in sor:
                     aktualis_telefon = sor.split("Mobil hívószám")[1].strip()
                     continue 
                 
                 if aktualis_telefon is None:
                     continue
-
-                # --- FORGALMI DÍJAK ÖSSZEGZÉSE (ÁLLAPOTGÉP) ---
                 
                 if "Forgalmi díjak - M2M NG" in sor:
                     forgalmi_blokkban_vagyunk = True
@@ -97,8 +101,6 @@ if uploaded_file is not None:
                                 except ValueError:
                                     pass
                     continue 
-
-                # --- NORMÁL TÉTELEK KERESÉSE ---
 
                 keresett_nevek = ["TESZOR", "Mobil telefon szolg.", "Vállalati e-Pack kedvezmény"]
                 megnevezes = next((nev for nev in keresett_nevek if nev in sor), None)
@@ -220,21 +222,22 @@ if uploaded_file is not None:
 
             time_end = time.time()
             
-            # Eredmény megjelenítése és gomb generálása
-            st.success(f"Feldolgozás kész! (Futási idő: {time_end - time_start:.2f} másodperc)")
-            
-            # Megjelenítjük a táblázatot is a weboldalon (opcionális, de hasznos)
-            st.dataframe(df_vegleges)
-            
-            # --- JAVÍTOTT RÉSZ: EXCEL EXPORT CSV HELYETT ---
+            # --- JAVÍTOTT RÉSZ: EXCEL EXPORT ---
             buffer = io.BytesIO()
-            # Excel fájl generálása a memóriában
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_vegleges.to_excel(writer, index=False, sheet_name='Összesítő')
             
-            st.download_button(
-                label="📥 Eredmény letöltése Excel (.xlsx) fájlként",
-                data=buffer.getvalue(),
-                file_name="telekom_szamla_osszesito.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.success(f"Feldolgozás kész! (Futási idő: {time_end - time_start:.2f} másodperc)")
+            st.dataframe(df_vegleges, use_container_width=True)
+            
+            # Letöltő gomb középre igazítása
+            dl_col1, dl_col2, dl_col3 = st.columns([1, 2, 1])
+            with dl_col2:
+                st.download_button(
+                    label="📥 Eredmény letöltése Excel (.xlsx) fájlként",
+                    data=buffer.getvalue(),
+                    file_name="telekom_szamla_osszesito.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
