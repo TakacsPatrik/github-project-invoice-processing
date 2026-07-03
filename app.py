@@ -27,17 +27,15 @@ if uploaded_file is not None:
             
             doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
             
-            # --- OKOS VIZUÁLIS SORRENDEZÉS (Layout-aware text extraction) ---
+            # --- OKOS VIZUÁLIS SORRENDEZÉS ---
             sorok = []
             for page in doc:
-                words = page.get_text("words")  # x0, y0, x1, y1, "word", b_no, l_no, w_no
+                words = page.get_text("words")  
                 if not words:
                     continue
                 
-                # Szavak rendezése: először Y (fentről le), majd X (balról jobbra) koordináta szerint
                 words.sort(key=lambda w: (w[1], w[0]))
                 
-                # Szavak sorokba csoportosítása (5 pixeles függőleges toleranciával)
                 page_lines = []
                 current_line = []
                 if words:
@@ -59,7 +57,9 @@ if uploaded_file is not None:
                         sorok.append(line.strip())
 
             adatok = []
-            aktualis_telefon = "Általános Tétel"
+            
+            # VISSZATETTÜK A TE EREDETI LOGIKÁDAT: Kezdetben NINCS telefon!
+            aktualis_telefon = None
 
             forgalmi_blokkban_vagyunk = False
             forgalmi_netto_osszeg = 0.0
@@ -68,20 +68,24 @@ if uploaded_file is not None:
             for i in range(len(sorok)):
                 sor = sorok[i].strip()
 
-                # KRITIKUS VÉDELEM: Ha a sor összesítőt tartalmaz, azonnal átugorjuk!
-                tiltott_szavak = ["összesen", "mindösszesen", "számla összesen", "fizetendő", "részösszeg"]
-                if any(szo in sor.lower() for szo in tiltott_szavak):
-                    continue
-
                 if "mennyiség" in sor or "egység" in sor or "Szolgáltatás TESZOR" in sor:
                     continue
                 
-                # --- HÍVÓSZÁM AZONOSÍTÁSA ---
+                # Hívószám blokk kezdete
                 if "Mobil hívószám" in sor:
                     parts = sor.split("Mobil hívószám")
                     if len(parts) > 1 and parts[1].strip():
                         aktualis_telefon = parts[1].replace(":", "").strip()
                     continue 
+
+                # Hívószám blokk vége (Te eredeti logikád!)
+                if "Utólag" in sor and "összesen" in sor:
+                    aktualis_telefon = None
+                    continue
+
+                # KRITIKUS VÉDELEM: Ha nem vagyunk benne egy telefonszám blokkjában (pl. a számla elején az összesítőnél), ugorjuk át!
+                if aktualis_telefon is None:
+                    continue
                 
                 # --- M2M BLOKK KEZELÉSE ---
                 if "Forgalmi díjak - M2M NG" in sor:
@@ -110,7 +114,6 @@ if uploaded_file is not None:
                             aktualis_forgalmi_teszor = teszor_match.group(1)
                     
                     if "10kbyte" in sor.lower() or "byte" in sor.lower():
-                        # Körülnézünk a jelenlegi és a környező sorokban az M2M árért
                         m2m_arak = re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', sor)
                         if not m2m_arak and i + 1 < len(sorok):
                             m2m_arak = re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', sorok[i+1])
@@ -123,22 +126,19 @@ if uploaded_file is not None:
                                 pass
                     continue 
 
-                # --- ÁLTALÁNOS TÉTELEK KINYERÉSE (ÚJ, BIZTONSÁGOS METÓDUS) ---
+                # --- ÁLTALÁNOS TÉTELEK KINYERÉSE ---
                 teszor_match = re.search(r'TESZOR\s*([\d\.]+)', sor)
                 
                 if teszor_match:    
                     teszor_szam = teszor_match.group(1)
                     valos_arak = []
                     
-                    # 1. Árak keresése a saját (már tökéletesen sorbarendezett) sorunkban
                     sajat_arak = re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', sor)
                     for a in sajat_arak:
                         val = float(a.replace('.', '').replace(',', '.'))
-                        # Kiszűrjük a mennyiségeket (1.0, 2.0) és a fix ÁFA kulcsokat (27.0, 5.0)
                         if val == 0.0 or val < 0.0 or (val >= 10.0 and val != 27.0 and val != 5.0):
                             valos_arak.append(a)
 
-                    # 2. Ha a vizuális tördelés miatt mégis hiányozna az ár, max 2 sort lépünk előre, nagyon szigorúan
                     if not valos_arak:
                         for j in range(1, 3):
                             if i + j < len(sorok):
@@ -154,7 +154,6 @@ if uploaded_file is not None:
                                 if valos_arak:
                                     break
 
-                    # 3. Ha találtunk érvényes árat, a legelső mindig a NETTÓ érték
                     if len(valos_arak) > 0:
                         netto_ar = valos_arak[0]
                         
@@ -166,9 +165,6 @@ if uploaded_file is not None:
                             "Kinyert Árak": str(valos_arak),
                             "Kiváltó Sor": sor
                         })
-
-                if "Utólag" in sor and "összesen" in sor:
-                    aktualis_telefon = "Általános Tétel"
 
             ###############################################
             # ADATOK ÖSSZEGZÉSE ÉS SOROKBA RENDEZÉSE
@@ -198,7 +194,6 @@ if uploaded_file is not None:
             sorszam = 1
 
             for tel, teszorok in telefon_osszesito.items():
-                
                 t_61_20_12 = teszorok.get("61.20.12", 0.0)
                 t_61_20_13 = teszorok.get("61.20.13", 0.0)
                 t_61_20_14 = teszorok.get("61.20.14", 0.0)
