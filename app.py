@@ -17,6 +17,14 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Telekom számla feltöltése (PDF)", type=["pdf"])
 
+# Új, okos Regex, ami kezeli a szóközt és a nem törhető szóközt is ezreselválasztóként
+regex_ar = r'-?\d{1,3}(?:[ \.\xA0]\d{3})*,\d{2}'
+
+def clean_szam(szam_str):
+    """Eltávolít minden szóközt és pontot, majd floattá alakítja a magyar pénzformátumot."""
+    tisztitott = re.sub(r'[^\d,-]', '', szam_str)
+    return float(tisztitott.replace(',', '.'))
+
 if uploaded_file is not None:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -27,7 +35,6 @@ if uploaded_file is not None:
             try:
                 time_start = time.time()
                 
-                # PDF megnyitása
                 doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
                 
                 teljes_szoveg = ""
@@ -49,24 +56,21 @@ if uploaded_file is not None:
                     if "mennyiség" in sor or "egység" in sor or "Szolgáltatás TESZOR" in sor:
                         continue
                     
-                    # --- RUGALMASABB HÍVÓSZÁM AZONOSÍTÁS ---
+                    # --- HÍVÓSZÁM AZONOSÍTÁS ---
                     if "Mobil hívószám" in sor:
-                        parts = sor.split("Mobil hívószám")
-                        if len(parts) > 1 and parts[1].strip():
-                            aktualis_telefon = parts[1].replace(":", "").strip()
+                        num_str = re.sub(r'\D', '', sor.split("Mobil hívószám")[-1])
+                        if len(num_str) >= 8:
+                            aktualis_telefon = num_str
                         else:
-                            # Ha a szám a következő sorba csúszott
                             if i + 1 < len(sorok):
-                                aktualis_telefon = sorok[i+1].strip().replace(":", "")
-                            else:
-                                aktualis_telefon = "Ismeretlen Szám"
+                                num_str = re.sub(r'\D', '', sorok[i+1])
+                                aktualis_telefon = num_str if len(num_str) >= 8 else "Ismeretlen Szám"
                         continue 
                     
                     if "Utólag" in sor and "összesen" in sor:
                         aktualis_telefon = None 
                         continue
 
-                    # Ha nem vagyunk egy konkrét telefonszám blokkjában, ugorjuk át
                     if aktualis_telefon is None:
                         continue
                     
@@ -78,7 +82,7 @@ if uploaded_file is not None:
 
                     if "Forgalmi díj kedvezmények" in sor:
                         if forgalmi_blokkban_vagyunk:
-                            formazott_osszeg = f"{forgalmi_netto_osszeg:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                            formazott_osszeg = f"{forgalmi_netto_osszeg:,.2f}".replace(".", ",").replace(",00", ",00")
                             adatok.append({
                                 "Sorszám": len(adatok) + 1,
                                 "Telefonszám": aktualis_telefon,
@@ -95,46 +99,49 @@ if uploaded_file is not None:
                             if teszor_match:
                                 aktualis_forgalmi_teszor = teszor_match.group(1)
                         
-                        if sor == "10kbyte":
-                            if i + 2 < len(sorok):
-                                netto_szam_str = sorok[i + 2].strip()
-                                match = re.search(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', netto_szam_str)
-                                if match:
-                                    tisztitott_szam = match.group(0).replace('.', '').replace(',', '.')
-                                    try:
-                                        forgalmi_netto_osszeg += float(tisztitott_szam)
-                                    except ValueError:
-                                        pass
+                        if "10kbyte" in sor.lower() or "byte" in sor.lower():
+                            m2m_arak = re.findall(regex_ar, sor)
+                            if not m2m_arak and i + 1 < len(sorok):
+                                m2m_arak = re.findall(regex_ar, sorok[i+1])
+                            if not m2m_arak and i + 2 < len(sorok):
+                                m2m_arak = re.findall(regex_ar, sorok[i+2])
+                                
+                            if m2m_arak:
+                                try:
+                                    forgalmi_netto_osszeg += clean_szam(m2m_arak[0])
+                                except ValueError:
+                                    pass
                         continue 
 
-                    # --- ÁLTALÁNOS TÉTELEK (ÁFA-HORGONY) ---
+                    # --- ÁLTALÁNOS TÉTELEK ---
                     teszor_match = re.search(r'TESZOR\s*([\d\.]+)', sor)
                     
                     if teszor_match:    
                         teszor_szam = teszor_match.group(1)
                         arak = []
                         
-                        arak.extend(re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', sor))
+                        arak.extend(re.findall(regex_ar, sor))
 
-                        for j in range(1, 12):
+                        for j in range(1, 15):
                             if i + j < len(sorok):
                                 kovetkezo_sor = sorok[i + j].strip()
                                 
                                 if "Mobil hívószám" in kovetkezo_sor or ("Utólag" in kovetkezo_sor and "összesen" in kovetkezo_sor):
                                     break
-                                elif "TESZOR" in kovetkezo_sor:
-                                    if "mennyiség" in kovetkezo_sor or "egység" in kovetkezo_sor:
-                                        continue 
-                                    else:
-                                        break     
                                 
-                                talalatok = re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', kovetkezo_sor)
+                                # Csak akkor állunk meg a következő TESZOR-nál, ha már van elég árunk,
+                                # így nem maradunk le az elcsúszott oszlopokról!
+                                if "TESZOR" in kovetkezo_sor and not ("mennyiség" in kovetkezo_sor or "egység" in kovetkezo_sor):
+                                    if len(arak) >= 3:
+                                        break
+                                
+                                talalatok = re.findall(regex_ar, kovetkezo_sor)
                                 arak.extend(talalatok)
 
                         valos_arak = []
                         for a in arak:
                             try:
-                                val = float(a.replace('.', '').replace(',', '.'))
+                                val = clean_szam(a)
                                 valos_arak.append((a, val))
                             except ValueError:
                                 pass
@@ -142,6 +149,7 @@ if uploaded_file is not None:
                         netto_ar = None
                         afa_idx = -1
                         
+                        # Hátulról keressük az ÁFA kulcsot
                         for idx in reversed(range(1, len(valos_arak))):
                             if valos_arak[idx][1] in [27.0, 5.0, 18.0, 0.0]:
                                 afa_idx = idx
@@ -168,7 +176,6 @@ if uploaded_file is not None:
                             "Kiváltó Sor": sor
                         })
 
-                # --- BIZTONSÁGI ELLENŐRZÉS: LETT-E ADAT? ---
                 if len(adatok) == 0:
                     st.warning("⚠️ A program lefutott, de nem talált kinyerhető adatot a PDF-ben. Kérlek ellenőrizd a számla formátumát!")
                 else:
@@ -186,8 +193,7 @@ if uploaded_file is not None:
                             telefon_osszesito[tel] = {}
                             
                         try:
-                            tisztitott = netto_str.replace('.', '').replace(',', '.')
-                            netto_ertek = float(tisztitott)
+                            netto_ertek = clean_szam(netto_str)
                         except ValueError:
                             netto_ertek = 0.0
 
@@ -269,7 +275,6 @@ if uploaded_file is not None:
                             use_container_width=True
                         )
             
-            # --- HIBAFOGÓ: HA BÁRMI ÖSSZEOMLIK, EZ KIÍRJA ---
             except Exception as e:
                 st.error("❌ Kritikus hiba történt a feldolgozás során!")
                 st.code(traceback.format_exc())
