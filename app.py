@@ -7,7 +7,7 @@ import re
 import pandas as pd
 import io
 
-# --- STREAMLIT FELÜLET BEÁLLÍTÁSA (Középre zárt elrendezés) ---
+# --- STREAMLIT FELÜLET BEÁLLÍTÁSA ---
 st.set_page_config(page_title="Telekom Számlafeldolgozó", layout="centered")
 
 st.markdown("<h1 style='text-align: center;'>📄 Telekom Számlafeldolgozó</h1>", unsafe_allow_html=True)
@@ -25,7 +25,6 @@ if uploaded_file is not None:
         with st.spinner("Számla feldolgozása folyamatban..."):
             time_start = time.time()
             
-            # PDF megnyitása
             doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
             
             teljes_szoveg = ""
@@ -48,14 +47,12 @@ if uploaded_file is not None:
                 if "mennyiség" in sor or "egység" in sor or "Szolgáltatás TESZOR" in sor:
                     continue
                 
-                # --- HÍVÓSZÁM AZONOSÍTÁSA ---
                 if "Mobil hívószám" in sor:
                     parts = sor.split("Mobil hívószám")
                     if len(parts) > 1 and parts[1].strip():
                         aktualis_telefon = parts[1].replace(":", "").strip()
                     continue 
                 
-                # --- M2M BLOKK (Változatlanul hagyva a te logikád alapján) ---
                 if "Forgalmi díjak - M2M NG" in sor:
                     forgalmi_blokkban_vagyunk = True
                     forgalmi_netto_osszeg = 0.0
@@ -92,47 +89,48 @@ if uploaded_file is not None:
                                     pass
                     continue 
 
-                # --- ÁLTALÁNOS TÉTELEK KINYERÉSE (ÚJ, RUGALMAS LOGIKA) ---
-                # Ha a sor tartalmazza a TESZOR szót, akkor számlázott tételhez értünk
                 teszor_match = re.search(r'TESZOR\s*([\d\.]+)', sor)
                 
                 if teszor_match:    
                     teszor_szam = teszor_match.group(1)
-
                     arak = []
-                    # 1. Megnézzük a jelenlegi sort, hátha egy sorban van a TESZOR és az ár
+                    
+                    # 1. Jelenlegi sor ellenőrzése
                     arak.extend(re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', sor))
 
-                    # 2. Végignézzük a következő 8 sort az árakért
-                    for j in range(1, 9):
+                    # 2. Következő 5 sor ellenőrzése (8 helyett, hogy ne menjünk túl messzire)
+                    for j in range(1, 6):
                         if i + j < len(sorok):
                             kovetkezo_sor = sorok[i + j].strip()
                             
-                            # Ha új tétel kezdődik, megállunk
-                            if "TESZOR" in kovetkezo_sor or "Mobil hívószám" in kovetkezo_sor or "összesen" in kovetkezo_sor:
+                            # Szigorúbb kilépés: ha új tétel jön vagy valamilyen összesítő
+                            kilepesi_szavak = ["teszor", "mobil hívószám", "összesen", "számla", "részösszeg", "fizetendő", "áfa"]
+                            if any(szo in kovetkezo_sor.lower() for szo in kilepesi_szavak):
                                 break   
                             
                             talalatok = re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', kovetkezo_sor)
                             arak.extend(talalatok)
 
-                    # Ár kiválasztási logika
-                    if len(arak) >= 3:
-                        netto_ar = arak[1]  # Általában: Egységár, Nettó, Bruttó -> A középső kell
-                    elif len(arak) == 2:
-                        netto_ar = arak[0]  # Nettó, Bruttó -> Az első kell
-                    elif len(arak) == 1:
-                        netto_ar = arak[0]  # Csak egy ár van (pl. kedvezmények)
-                    else:
-                        netto_ar = "0,00"   # Nem talált árat
+                    # 3. Árak szűrése (Ez oldja meg a mennyiségek és hibás számok problémáját)
+                    valos_arak = []
+                    for a in arak:
+                        val = float(a.replace('.', '').replace(',', '.'))
+                        # Kiszűrjük a mennyiségeket (pl. 1,00 vagy 2,00), de marad a 0,00, a negatív kedvezmény, és a 10 Ft feletti árak
+                        if val == 0.0 or val >= 10.0 or val < 0.0:
+                            valos_arak.append(a)
 
-                    adatok.append({
-                        "Sorszám": len(adatok) + 1,
-                        "Telefonszám": aktualis_telefon,
-                        "TESZOR": teszor_szam,
-                        "Nettó Ár": netto_ar,
-                        "Kinyert Árak": str(arak), # Segít a hibakeresésben
-                        "Kiváltó Sor": sor # Segít a hibakeresésben
-                    })
+                    # 4. Ha van valós ár, a NETTÓ mindig a legelső a listában
+                    if len(valos_arak) > 0:
+                        netto_ar = valos_arak[0]
+                        
+                        adatok.append({
+                            "Sorszám": len(adatok) + 1,
+                            "Telefonszám": aktualis_telefon,
+                            "TESZOR": teszor_szam,
+                            "Nettó Ár": netto_ar,
+                            "Kinyert Árak": str(valos_arak),
+                            "Kiváltó Sor": sor
+                        })
 
                 if "Utólag" in sor and "összesen" in sor:
                     aktualis_telefon = "Általános Tétel"
@@ -203,7 +201,7 @@ if uploaded_file is not None:
                 sorszam += 1
 
             df_vegleges = pd.DataFrame(vegleges_sorok)
-            df_debug = pd.DataFrame(adatok) # Létrehozzuk a nyers adatos táblázatot is
+            df_debug = pd.DataFrame(adatok) 
 
             osszesen_sor = {col: "" for col in df_vegleges.columns}
             utolso_3_oszlop = df_vegleges.columns[-3:]
@@ -215,11 +213,10 @@ if uploaded_file is not None:
 
             time_end = time.time()
             
-            # --- TÖBB MUNKALAPOS EXCEL EXPORT ---
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_vegleges.to_excel(writer, index=False, sheet_name='Összesítő')
-                df_debug.to_excel(writer, index=False, sheet_name='Nyers Kinyert Adatok') # Új fül!
+                df_debug.to_excel(writer, index=False, sheet_name='Nyers Kinyert Adatok')
             
             st.markdown("<br>", unsafe_allow_html=True)
             st.success(f"Feldolgozás kész! (Futási idő: {time_end - time_start:.2f} másodperc)")
