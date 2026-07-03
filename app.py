@@ -73,7 +73,7 @@ if uploaded_file is not None:
                     continue
 
                 # Ha még nem találtunk telefont, a sor nem releváns a tételek szempontjából
-                if nem aktualis_telefon:
+                if not aktualis_telefon:
                     i += 1
                     continue
                 
