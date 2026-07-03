@@ -7,134 +7,156 @@ import re
 import pandas as pd
 import io
 
-# --- STREAMLIT FELÜLET BEÁLLÍTÁSA ---
+# --- STREAMLIT FELÜLET BEÁLLÍTÁSA (Középre zárt elrendezés) ---
 st.set_page_config(page_title="Telekom Számlafeldolgozó", layout="centered")
 
+# Szövegek középre igazítása HTML formázással
 st.markdown("<h1 style='text-align: center;'>📄 Telekom Számlafeldolgozó</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Töltsd fel a digitális Telekom PDF számlát, majd kattints a feldolgozás gombra!</p>", unsafe_allow_html=True)
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True) # Egy kis térköz
 
+# Fájlfeltöltő modul
 uploaded_file = st.file_uploader("Telekom számla feltöltése (PDF)", type=["pdf"])
 
 if uploaded_file is not None:
+    # A gomb középre igazítása oszlopok segítségével
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         start_button = st.button("🚀 Számla feldolgozása", use_container_width=True)
 
     if start_button:
         with st.spinner("Számla feldolgozása folyamatban..."):
-            time_start = time.time()
+            time_start = time.time() # időmérés kezdete
             
-            # --- 1. Szövegkiolvasó rész ---
+            #############################################
+            # Szövegkiolvasó rész
+            #############################################
+            
+            # PDF megnyitása a feltöltött fájlból (memóriából)
             doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
             
             teljes_szoveg = ""
             for page in doc:
-                teljes_szoveg += page.get_text() + "\n"
+                text = page.get_text()
+                teljes_szoveg += text + "\n"
             
-            sorok = teljes_szoveg.splitlines()
+            # A korábbi txt fájl soronkénti olvasásának szimulálása
+            sorok = teljes_szoveg.splitlines(True)
 
-            # --- 2. Szövegkereső rész ---
+            ###############################################
+            # Szövegkereső rész (AZ EREDETI LOGIKÁD JAVÍTÁSA)
+            ###############################################
+
             adatok = []
             aktualis_telefon = None
-            aktualis_teszor = "61.20.12" 
-            
-            # Regex minták a mértékegységekhez és árakhoz
-            unit_pattern = r'^(hó|hỏ|db|p:mp|perc|%|10kbyte|alk\.)(.*)$'
-            ar_pattern_nyers = r'-?\d{1,3}(?:[\.\s]\d{3})*[,.]\d{2}'
 
-            i = 0
-            while i < len(sorok):
+            # --- ÁLLAPOTGÉP VÁLTOZÓI ---
+            forgalmi_blokkban_vagyunk = False
+            forgalmi_netto_osszeg = 0.0
+            aktualis_forgalmi_teszor = "61.20.42" 
+
+            for i in range(len(sorok)):
                 sor = sorok[i].strip()
-                if not sor:
-                    i += 1
+
+                if "mennyiség" in sor or "egység" in sor or "Szolgáltatás TESZOR" in sor:
                     continue
                 
-                # Fejlécek és zajszűrés
-                if "mennyiség" in sor or "egység nettó egységár" in sor:
-                    i += 1
-                    continue
-
-                # 1. Telefon azonosítása (visszatérve a Te eredeti, jól bevált split-es megoldásodra!)
+                # JAVÍTÁS: A split megtartása mellett re.sub-bal kikapjuk a belső felesleges szóközöket a hívószámból
                 if "Mobil hívószám" in sor:
-                    parts = sor.split("Mobil hívószám")
-                    if len(parts) > 1:
-                        aktualis_telefon = parts[1].strip()
-                    aktualis_teszor = "61.20.12" 
-                    i += 1
-                    continue
+                    nyers_szam = sor.split("Mobil hívószám")[1].strip()
+                    aktualis_telefon = re.sub(r'\s+', '', nyers_szam)
+                    continue 
                 
-                # 1/B. Folyószámla szintű tételek bekérése (pl. ACCLEVCONTR)
+                # JAVÍTÁS: Folyószámla szintű tételek (pl. EFT központi díj) beemelése
                 if "ACCLEVCONTR" in sor:
-                    parts = sor.split("ACCLEVCONTR")
-                    if len(parts) > 1:
-                        aktualis_telefon = "Folyószámla: " + parts[1].strip()
-                    aktualis_teszor = "61.20.12"
-                    i += 1
-                    continue
-
-                # Ha nem tudjuk kihez tartozik a tétel, ugrunk
-                if not aktualis_telefon:
-                    i += 1
+                    aktualis_telefon = "Folyószámla: " + sor.split("ACCLEVCONTR")[1].strip()
                     continue
                 
-                # Adott telefonszám blokkjának lezárása
-                if "Utólag" in sor and "összesen" in sor:
-                    aktualis_telefon = None
-                    i += 1
+                if aktualis_telefon is None:
+                    continue
+                
+                if "Forgalmi díjak - M2M NG" in sor:
+                    forgalmi_blokkban_vagyunk = True
+                    forgalmi_netto_osszeg = 0.0
                     continue
 
-                # 2. TESZOR kód frissítése a blokk fejlécéből
-                blokk_teszor_match = re.search(r'\(TESZOR\s*([\d\.]+)\)', sor)
-                if blokk_teszor_match:
-                    aktualis_teszor = blokk_teszor_match.group(1)
-                elif "Előfizetési díjak" in sor and "TESZOR" not in sor:
-                    aktualis_teszor = "61.20.12"
-
-                # 3. Tétel felismerése a mértékegység alapján
-                if re.match(unit_pattern, sor):
-                    targy_teszor = aktualis_teszor
-                    
-                    # Visszanézünk 1-4 sort, hátha van egyedi TESZOR (pl. mobil parkolásnál)
-                    for back_j in range(1, 5):
-                        if i - back_j >= 0:
-                            prev_line = sorok[i - back_j].strip()
-                            explicit_teszor_match = re.search(r'TESZOR\s*([\d\.]+)', prev_line)
-                            if explicit_teszor_match:
-                                targy_teszor = explicit_teszor_match.group(1)
-                                break
-                    
-                    # Előrenézünk az árakért a következő sorokban
-                    prices = []
-                    for j in range(1, min(6, len(sorok) - i)):
-                        next_line = sorok[i+j].strip()
-                        talalatok = re.findall(ar_pattern_nyers, next_line)
-                        
-                        if talalatok:
-                            prices.extend(talalatok)
-                        elif next_line and len(next_line) > 3 and not re.match(r'^\d+[,.]\d+$', next_line):
-                            break # Ha már szöveg jön ár helyett, megszakítjuk
-                            
-                    if prices:
-                        # Általában 3 ár van (Egységár, Nettó, Bruttó). A nettó az utolsó előtti. 
-                        # Ha csak 2 ár van (pl. kedvezmény), akkor az első a nettó.
-                        if len(prices) >= 3:
-                            netto_ar = prices[-2]
-                        else:
-                            netto_ar = prices[0]
-                            
+                if "Forgalmi díj kedvezmények" in sor:
+                    if forgalmi_blokkban_vagyunk:
+                        formazott_osszeg = f"{forgalmi_netto_osszeg:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                         adatok.append({
+                            "Sorszám": len(adatok) + 1,
                             "Telefonszám": aktualis_telefon,
-                            "TESZOR": targy_teszor,
-                            "Nettó Ár": netto_ar
+                            "TESZOR": aktualis_forgalmi_teszor,
+                            "Nettó Ár": formazott_osszeg
                         })
-                
-                i += 1
+                    forgalmi_blokkban_vagyunk = False
 
+                if forgalmi_blokkban_vagyunk:
+                    if "TESZOR" in sor:
+                        teszor_match = re.search(r'TESZOR\s*([\d\.]+)', sor)
+                        if teszor_match:
+                            aktualis_forgalmi_teszor = teszor_match.group(1)
+                    
+                    if sor == "10kbyte":
+                        if i + 2 < len(sorok):
+                            netto_szam_str = sorok[i + 2].strip()
+                            match = re.search(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', netto_szam_str)
+                            if match:
+                                tisztitott_szam = match.group(0).replace('.', '').replace(',', '.')
+                                try:
+                                    forgalmi_netto_osszeg += float(tisztitott_szam)
+                                except ValueError:
+                                    pass
+                    continue 
 
-            # --- 3. ADATOK ÖSSZEGZÉSE (Dinamikus) ---
+                # JAVÍTÁS: Kibővítettük a kulcsszavakat, hogy az SMS és MMS sorok árait se ugorja át a kódod
+                keresett_nevek = ["TESZOR", "Mobil telefon szolg.", "Vállalati e-Pack kedvezmény", "SMS", "MMS", "Parkolás", "Tájékoztató"]
+                megnevezes = next((nev for nev in keresett_nevek if nev in sor), None)
+
+                if megnevezes:    
+                    teszor_match = re.search(r'TESZOR\s*([\d\.]+)', sor)
+                    teszor_szam = teszor_match.group(1) if teszor_match else "61.20.12"
+
+                    arak = []
+                    for j in range(1, 12):
+                        if i + j < len(sorok):
+                            kovetkezo_sor = sorok[i + j].strip()
+                            
+                            if "Mobil hívószám" in kovetkezo_sor or ("Utólag" in kovetkezo_sor and "összesen" in kovetkezo_sor) or "ACCLEVCONTR" in kovetkezo_sor:
+                                break
+                            elif "TESZOR" in kovetkezo_sor:
+                                if "mennyiség" in kovetkezo_sor or "egység" in kovetkezo_sor:
+                                    continue 
+                                else:
+                                    break     
+                            
+                            talalatok = re.findall(r'-?\d{1,3}(?:\.\d{3})*[,.]\d{2}', kovetkezo_sor)
+                            arak.extend(talalatok)
+
+                    if len(arak) >= 3:
+                        netto_ar = arak[1]  
+                    elif len(arak) == 2:
+                        netto_ar = arak[0]
+                    elif len(arak) == 1:
+                        netto_ar = arak[0]  
+                    else:
+                        netto_ar = f"Nem találom a Nettó árat, {len(arak)} ár található"
+
+                    adatok.append({
+                        "Sorszám": len(adatok) + 1,
+                        "Telefonszám": aktualis_telefon,
+                        "TESZOR": teszor_szam,
+                        "Nettó Ár": netto_ar if netto_ar else "Nem található"
+                    })
+
+                if "Utólag" in sor and "összesen" in sor:
+                    aktualis_telefon = None 
+
+            ###############################################
+            # ADATOK ÖSSZEGZÉSE ÉS SOROKBA RENDEZÉSE (AZ EREDETI EXCEL STRUKTÚRÁD)
+            ###############################################
+
             telefon_osszesito = {}
-            osszes_talalt_teszor = set()
 
             for adat in adatok:
                 tel = adat["Telefonszám"]
@@ -144,15 +166,9 @@ if uploaded_file is not None:
                 if tel not in telefon_osszesito:
                     telefon_osszesito[tel] = {}
                     
-                # Szám formázása okosan (elírt tizedespontok és szóközök kezelése a Telekom PDF-ből)
                 try:
-                    p = re.sub(r'\s+', '', netto_str)
-                    match = re.search(r'[,.](\d{2})$', p)
-                    if match:
-                        p_no_decimals = p[:-3].replace('.', '').replace(',', '')
-                        netto_ertek = float(p_no_decimals + '.' + match.group(1))
-                    else:
-                        netto_ertek = float(p.replace('.', '').replace(',', ''))
+                    tisztitott = netto_str.replace('.', '').replace(',', '.')
+                    netto_ertek = float(tisztitott)
                 except ValueError:
                     netto_ertek = 0.0
 
@@ -160,86 +176,94 @@ if uploaded_file is not None:
                     telefon_osszesito[tel][teszor] = 0.0
                 
                 telefon_osszesito[tel][teszor] += netto_ertek
-                osszes_talalt_teszor.add(teszor)
-
-            # Rendezzük az oszlopokat (hogy a 61.20.12 kerüljön előre)
-            osszes_talalt_teszor = sorted(list(osszes_talalt_teszor))
-            afa_5_teszorok = ["61.20.42", "61.20.43"]
 
             vegleges_sorok = []
             sorszam = 1
 
             for tel, teszorok in telefon_osszesito.items():
-                sor_adat = {
-                    "Sorszám": sorszam,
-                    "Mobilszám / Folyószámla": tel
-                }
                 
-                netto_27_osszesen = 0.0
-                netto_5_osszesen = 0.0
+                t_61_20_12 = teszorok.get("61.20.12", 0.0)
+                t_61_20_13 = teszorok.get("61.20.13", 0.0)
+                t_61_20_14 = teszorok.get("61.20.14", 0.0)
                 
-                # Dinamikusan létrehozzuk az oszlopokat az összes megtalált TESZOR alapján
-                for t_kod in osszes_talalt_teszor:
-                    netto_ertek = teszorok.get(t_kod, 0.0)
-                    
-                    if t_kod in afa_5_teszorok:
-                        afa_kulcs = "5%"
-                        netto_5_osszesen += netto_ertek
-                    else:
-                        afa_kulcs = "27%"
-                        netto_27_osszesen += netto_ertek
-                        
-                    sor_adat[f"TESZOR {t_kod} ({afa_kulcs}) nettó (Ft)"] = round(netto_ertek, 2)
+                sum_3 = t_61_20_12 + t_61_20_13 + t_61_20_14
+                sum_3_27 = sum_3 * 0.27
                 
-                # Fő aggregátumok számítása a kerekítési hibák elkerülése végett
-                sor_adat["Összes 27% ÁFÁ-s nettó (Ft)"] = round(netto_27_osszesen, 2)
-                sor_adat["27% ÁFA (Ft)"] = round(netto_27_osszesen * 0.27, 2)
+                t_61_20_30 = teszorok.get("61.20.30", 0.0)
+                t_61_20_30_27 = t_61_20_30 * 0.27
                 
-                sor_adat["Összes 5% ÁFÁ-s nettó (Ft)"] = round(netto_5_osszesen, 2)
-                sor_adat["5% ÁFA (Ft)"] = round(netto_5_osszesen * 0.05, 2)
+                # JAVÍTÁS: 51.21.24 helyett a jó 52.21.24 kód használata
+                t_52_21_24 = teszorok.get("52.21.24", 0.0)
+                t_52_21_24_27 = t_52_21_24 * 0.27
                 
-                osszes_netto = netto_27_osszesen + netto_5_osszesen
-                osszes_afa = (netto_27_osszesen * 0.27) + (netto_5_osszesen * 0.05)
+                # JAVÍTÁS: Két új, számlán szereplő 27%-os TESZOR oszlop beemelése az összegek pontosságáért
+                t_62_09_20 = teszorok.get("62.09.20", 0.0)
+                t_62_09_20_27 = t_62_09_20 * 0.27
                 
-                sor_adat["Mindösszesen nettó (Ft)"] = round(osszes_netto, 2)
-                sor_adat["Mindösszesen ÁFA (Ft)"] = round(osszes_afa, 2)
-                sor_adat["Mindösszesen bruttó (Ft)"] = round(osszes_netto + osszes_afa, 2)
+                t_82_99_19 = teszorok.get("82.99.19", 0.0)
+                t_82_99_19_27 = t_82_99_19 * 0.27
+                
+                t_61_20_42 = teszorok.get("61.20.42", 0.0)
+                t_61_20_42_5 = t_61_20_42 * 0.05
+                
+                # Összesítések kiszámítása
+                mind_netto = sum_3 + t_61_20_30 + t_52_21_24 + t_62_09_20 + t_82_99_19 + t_61_20_42
+                mind_afa = sum_3_27 + t_61_20_30_27 + t_52_21_24_27 + t_62_09_20_27 + t_82_99_19_27 + t_61_20_42_5
 
-                vegleges_sorok.append(sor_adat)
+                vegleges_sorok.append({
+                    "sorszám": sorszam, 
+                    "mobilszám": tel, 
+                    "61.20.12 : 27%-os nettó (Ft)": round(t_61_20_12, 2), 
+                    "61.20.13 : 27%-os nettó (Ft)": round(t_61_20_13, 2), 
+                    "61.20.14 : 27%-os nettó (Ft)": round(t_61_20_14, 2), 
+                    "27%-os rész nettó (Ft)": round(sum_3, 2), 
+                    "27% ÁFA Összesített": round(sum_3_27, 2), 
+                    "61.20.30 : 27%-os nettó (Ft)": round(t_61_20_30, 2), 
+                    "27% ÁFA 61.20.30": round(t_61_20_30_27, 2), 
+                    "52.21.24 : 27%-os nettó (Ft)": round(t_52_21_24, 2), 
+                    "27% ÁFA 52.21.24": round(t_52_21_24_27, 2), 
+                    "62.09.20 : 27%-os nettó (Ft)": round(t_62_09_20, 2),
+                    "27% ÁFA 62.09.20": round(t_62_09_20_27, 2),
+                    "82.99.19 : 27%-os nettó (Ft)": round(t_82_99_19, 2),
+                    "27% ÁFA 82.99.19": round(t_82_99_19_27, 2),
+                    "61.20.42 : 5%-os nettó (Ft)": round(t_61_20_42, 2), 
+                    "5% ÁFA 61.20.42": round(t_61_20_42_5, 2), 
+                    "Összes nettó (Ft)": round(mind_netto, 2), 
+                    "Összes ÁFA (Ft)": round(mind_afa, 2), 
+                    "Összes bruttó (Ft)": round(mind_netto + mind_afa, 2) 
+                })
                 sorszam += 1
 
-            # --- 4. EXCEL EXPORTÁLÁS ---
-            if not vegleges_sorok:
-                st.error("❌ Nem találtam feldolgozható adatot a számlában! Győződj meg róla, hogy helyes PDF-et töltöttél fel.")
-            else:
-                df_vegleges = pd.DataFrame(vegleges_sorok)
+            df_vegleges = pd.DataFrame(vegleges_sorok)
 
-                # Legalsó "Összesen" sor hozzáadása
-                osszesen_sor = {col: "" for col in df_vegleges.columns}
-                osszesen_sor["Mobilszám / Folyószámla"] = "ÖSSZESEN"
-                
-                # Az oszlopok szummázása a számadatoknál
-                for col in df_vegleges.columns[2:]:
-                    osszesen_sor[col] = round(df_vegleges[col].sum(), 2)
+            # Alsó Összegző sor felépítése
+            osszesen_sor = {col: "" for col in df_vegleges.columns}
+            osszesen_sor["mobilszám"] = "ÖSSZESEN"
+            utolso_oszlopok = df_vegleges.columns[2:]
+            
+            for col in utolso_oszlopok:
+                osszesen_sor[col] = round(df_vegleges[col].sum(), 2)
 
-                df_vegleges = pd.concat([df_vegleges, pd.DataFrame([osszesen_sor])], ignore_index=True)
+            df_vegleges = pd.concat([df_vegleges, pd.DataFrame([osszesen_sor])], ignore_index=True)
 
-                time_end = time.time()
-                
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_vegleges.to_excel(writer, index=False, sheet_name='Összesítő')
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.success(f"✅ Feldolgozás kész! {sorszam-1} telefonszám/folyószámla tétele feldolgozva. (Futási idő: {time_end - time_start:.2f} másodperc)")
-                st.dataframe(df_vegleges, use_container_width=True)
-                
-                dl_col1, dl_col2, dl_col3 = st.columns([1, 2, 1])
-                with dl_col2:
-                    st.download_button(
-                        label="📥 Eredmény letöltése Excel (.xlsx) fájlként",
-                        data=buffer.getvalue(),
-                        file_name="telekom_szamla_osszesito.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+            time_end = time.time()
+            
+            # Excel export
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_vegleges.to_excel(writer, index=False, sheet_name='Összesítő')
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.success(f"Feldolgozás kész! (Futási idő: {time_end - time_start:.2f} másodperc)")
+            st.dataframe(df_vegleges, use_container_width=True)
+            
+            # Letöltő gomb
+            dl_col1, dl_col2, dl_col3 = st.columns([1, 2, 1])
+            with dl_col2:
+                st.download_button(
+                    label="📥 Eredmény letöltése Excel (.xlsx) fájlként",
+                    data=buffer.getvalue(),
+                    file_name="telekom_szamla_osszesito.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
