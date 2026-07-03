@@ -44,7 +44,7 @@ if uploaded_file is not None:
             sorok = teljes_szoveg.splitlines(True)
 
             ###############################################
-            # Szövegkereső rész (AZ EREDETI LOGIKÁD JAVÍTÁSA)
+            # Szövegkereső rész (VÁLTOZATLAN LOGIKA)
             ###############################################
 
             adatok = []
@@ -61,16 +61,9 @@ if uploaded_file is not None:
                 if "mennyiség" in sor or "egység" in sor or "Szolgáltatás TESZOR" in sor:
                     continue
                 
-                # JAVÍTÁS: A split megtartása mellett re.sub-bal kikapjuk a belső felesleges szóközöket a hívószámból
                 if "Mobil hívószám" in sor:
-                    nyers_szam = sor.split("Mobil hívószám")[1].strip()
-                    aktualis_telefon = re.sub(r'\s+', '', nyers_szam)
+                    aktualis_telefon = sor.split("Mobil hívószám")[1].strip()
                     continue 
-                
-                # JAVÍTÁS: Folyószámla szintű tételek (pl. EFT központi díj) beemelése
-                if "ACCLEVCONTR" in sor:
-                    aktualis_telefon = "Folyószámla: " + sor.split("ACCLEVCONTR")[1].strip()
-                    continue
                 
                 if aktualis_telefon is None:
                     continue
@@ -109,8 +102,7 @@ if uploaded_file is not None:
                                     pass
                     continue 
 
-                # JAVÍTÁS: Kibővítettük a kulcsszavakat, hogy az SMS és MMS sorok árait se ugorja át a kódod
-                keresett_nevek = ["TESZOR", "Mobil telefon szolg.", "Vállalati e-Pack kedvezmény", "SMS", "MMS", "Parkolás", "Tájékoztató"]
+                keresett_nevek = ["TESZOR", "Mobil telefon szolg.", "Vállalati e-Pack kedvezmény"]
                 megnevezes = next((nev for nev in keresett_nevek if nev in sor), None)
 
                 if megnevezes:    
@@ -122,7 +114,7 @@ if uploaded_file is not None:
                         if i + j < len(sorok):
                             kovetkezo_sor = sorok[i + j].strip()
                             
-                            if "Mobil hívószám" in kovetkezo_sor or ("Utólag" in kovetkezo_sor and "összesen" in kovetkezo_sor) or "ACCLEVCONTR" in kovetkezo_sor:
+                            if "Mobil hívószám" in kovetkezo_sor or ("Utólag" in kovetkezo_sor and "összesen" in kovetkezo_sor):
                                 break
                             elif "TESZOR" in kovetkezo_sor:
                                 if "mennyiség" in kovetkezo_sor or "egység" in kovetkezo_sor:
@@ -130,7 +122,7 @@ if uploaded_file is not None:
                                 else:
                                     break     
                             
-                            talalatok = re.findall(r'-?\d{1,3}(?:\.\d{3})*[,.]\d{2}', kovetkezo_sor)
+                            talalatok = re.findall(r'-?\d{1,3}(?:\.\d{3})*,\d{2}', kovetkezo_sor)
                             arak.extend(talalatok)
 
                     if len(arak) >= 3:
@@ -153,7 +145,7 @@ if uploaded_file is not None:
                     aktualis_telefon = None 
 
             ###############################################
-            # ADATOK ÖSSZEGZÉSE ÉS SOROKBA RENDEZÉSE (AZ EREDETI EXCEL STRUKTÚRÁD)
+            # ADATOK ÖSSZEGZÉSE ÉS SOROKBA RENDEZÉSE
             ###############################################
 
             telefon_osszesito = {}
@@ -192,24 +184,12 @@ if uploaded_file is not None:
                 t_61_20_30 = teszorok.get("61.20.30", 0.0)
                 t_61_20_30_27 = t_61_20_30 * 0.27
                 
-                # JAVÍTÁS: 51.21.24 helyett a jó 52.21.24 kód használata
-                t_52_21_24 = teszorok.get("52.21.24", 0.0)
-                t_52_21_24_27 = t_52_21_24 * 0.27
-                
-                # JAVÍTÁS: Két új, számlán szereplő 27%-os TESZOR oszlop beemelése az összegek pontosságáért
-                t_62_09_20 = teszorok.get("62.09.20", 0.0)
-                t_62_09_20_27 = t_62_09_20 * 0.27
-                
-                t_82_99_19 = teszorok.get("82.99.19", 0.0)
-                t_82_99_19_27 = t_82_99_19 * 0.27
+                t_51_21_24 = teszorok.get("51.21.24", 0.0)
+                t_51_21_24_27 = t_51_21_24 * 0.27
                 
                 t_61_20_42 = teszorok.get("61.20.42", 0.0)
                 t_61_20_42_5 = t_61_20_42 * 0.05
                 
-                # Összesítések kiszámítása
-                mind_netto = sum_3 + t_61_20_30 + t_52_21_24 + t_62_09_20 + t_82_99_19 + t_61_20_42
-                mind_afa = sum_3_27 + t_61_20_30_27 + t_52_21_24_27 + t_62_09_20_27 + t_82_99_19_27 + t_61_20_42_5
-
                 vegleges_sorok.append({
                     "sorszám": sorszam, 
                     "mobilszám": tel, 
@@ -220,35 +200,29 @@ if uploaded_file is not None:
                     "27% ÁFA Összesített": round(sum_3_27, 2), 
                     "61.20.30 : 27%-os nettó (Ft)": round(t_61_20_30, 2), 
                     "27% ÁFA 61.20.30": round(t_61_20_30_27, 2), 
-                    "52.21.24 : 27%-os nettó (Ft)": round(t_52_21_24, 2), 
-                    "27% ÁFA 52.21.24": round(t_52_21_24_27, 2), 
-                    "62.09.20 : 27%-os nettó (Ft)": round(t_62_09_20, 2),
-                    "27% ÁFA 62.09.20": round(t_62_09_20_27, 2),
-                    "82.99.19 : 27%-os nettó (Ft)": round(t_82_99_19, 2),
-                    "27% ÁFA 82.99.19": round(t_82_99_19_27, 2),
+                    "51.21.24 : 27%-os nettó (Ft)": round(t_51_21_24, 2), 
+                    "27% ÁFA 51.21.24": round(t_51_21_24_27, 2), 
                     "61.20.42 : 5%-os nettó (Ft)": round(t_61_20_42, 2), 
                     "5% ÁFA 61.20.42": round(t_61_20_42_5, 2), 
-                    "Összes nettó (Ft)": round(mind_netto, 2), 
-                    "Összes ÁFA (Ft)": round(mind_afa, 2), 
-                    "Összes bruttó (Ft)": round(mind_netto + mind_afa, 2) 
+                    "Összes nettó (Ft)": round(sum_3 + t_61_20_30 + t_51_21_24 + t_61_20_42, 2), 
+                    "Összes ÁFA (Ft)": round(sum_3_27 + t_61_20_30_27 + t_51_21_24_27 + t_61_20_42_5, 2), 
+                    "Összes bruttó (Ft)": round(sum_3 + t_61_20_30 + t_51_21_24 + t_61_20_42 + sum_3_27 + t_61_20_30_27 + t_51_21_24_27 + t_61_20_42_5, 2) 
                 })
                 sorszam += 1
 
             df_vegleges = pd.DataFrame(vegleges_sorok)
 
-            # Alsó Összegző sor felépítése
             osszesen_sor = {col: "" for col in df_vegleges.columns}
-            osszesen_sor["mobilszám"] = "ÖSSZESEN"
-            utolso_oszlopok = df_vegleges.columns[2:]
+            utolso_3_oszlop = df_vegleges.columns[-3:]
             
-            for col in utolso_oszlopok:
+            for col in utolso_3_oszlop:
                 osszesen_sor[col] = round(df_vegleges[col].sum(), 2)
 
             df_vegleges = pd.concat([df_vegleges, pd.DataFrame([osszesen_sor])], ignore_index=True)
 
             time_end = time.time()
             
-            # Excel export
+            # --- JAVÍTOTT RÉSZ: EXCEL EXPORT ---
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_vegleges.to_excel(writer, index=False, sheet_name='Összesítő')
@@ -257,7 +231,7 @@ if uploaded_file is not None:
             st.success(f"Feldolgozás kész! (Futási idő: {time_end - time_start:.2f} másodperc)")
             st.dataframe(df_vegleges, use_container_width=True)
             
-            # Letöltő gomb
+            # Letöltő gomb középre igazítása
             dl_col1, dl_col2, dl_col3 = st.columns([1, 2, 1])
             with dl_col2:
                 st.download_button(
