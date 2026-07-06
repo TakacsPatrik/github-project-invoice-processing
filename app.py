@@ -197,7 +197,7 @@ def get_teszor(desc):
     if "multisim" in desc_lower or "multi-sim" in desc_lower: return "82.99.19"
     if any(k in desc_lower for k in ["adat", "net", "internet", "apn", "netgarancia", "gprs", "éjszaka", "csúcsid", "egyéb id"]): 
         return "61.20.42"
-    if "parkolás" in desc_lower: return "51.21.24"
+    if "parkolás" in desc_lower: return "52.21.24"
     
     return "61.20.12"
 
@@ -356,7 +356,7 @@ def export_to_excel(fajlnev, kimenet_fajlnev="telekom_szamla_osszesito.xlsx"):
                 if current_prices:
                     desc = " ".join(current_desc_lines)
                     teszor = get_teszor(desc)
-                    if teszor == "52.21.24": teszor = "51.21.24" 
+                    if teszor == "52.21.24": teszor = "52.21.24" 
                     netto = get_netto(current_prices)
                     teszorok[teszor] = teszorok.get(teszor, 0.0) + netto
                 break
@@ -370,7 +370,7 @@ def export_to_excel(fajlnev, kimenet_fajlnev="telekom_szamla_osszesito.xlsx"):
                 if current_prices:
                     desc = " ".join(current_desc_lines)
                     teszor = get_teszor(desc)
-                    if teszor == "52.21.24": teszor = "51.21.24" 
+                    if teszor == "52.21.24": teszor = "52.21.24" 
                     netto = get_netto(current_prices)
                     teszorok[teszor] = teszorok.get(teszor, 0.0) + netto
                     
@@ -388,8 +388,8 @@ def export_to_excel(fajlnev, kimenet_fajlnev="telekom_szamla_osszesito.xlsx"):
         t_61_20_30 = teszorok.get("61.20.30", 0.0)
         t_61_20_30_27 = t_61_20_30 * 0.27
         
-        t_51_21_24 = teszorok.get("51.21.24", 0.0)
-        t_51_21_24_27 = t_51_21_24 * 0.27
+        t_52_21_24 = teszorok.get("52.21.24", 0.0)
+        t_52_21_24_27 = t_52_21_24 * 0.27
         
         t_62_09_20 = teszorok.get("62.09.20", 0.0)
         t_62_09_20_27 = t_62_09_20 * 0.27
@@ -400,8 +400,8 @@ def export_to_excel(fajlnev, kimenet_fajlnev="telekom_szamla_osszesito.xlsx"):
         t_61_20_42 = teszorok.get("61.20.42", 0.0)
         t_61_20_42_5 = t_61_20_42 * 0.05
         
-        total_netto = sum_3 + t_61_20_30 + t_51_21_24 + t_82_99_19 + t_62_09_20 + t_61_20_42
-        total_afa = sum_3_27 + t_61_20_30_27 + t_51_21_24_27 + t_82_99_19_27 + t_62_09_20_27 + t_61_20_42_5
+        total_netto = sum_3 + t_61_20_30 + t_52_21_24 + t_82_99_19 + t_62_09_20 + t_61_20_42
+        total_afa = sum_3_27 + t_61_20_30_27 + t_52_21_24_27 + t_82_99_19_27 + t_62_09_20_27 + t_61_20_42_5
         
         vegleges_sorok.append({
             "sorszám": sorszam, 
@@ -413,8 +413,8 @@ def export_to_excel(fajlnev, kimenet_fajlnev="telekom_szamla_osszesito.xlsx"):
             "27% ÁFA Összesített": round(sum_3_27, 2), 
             "61.20.30 : 27%-os nettó (Ft)": round(t_61_20_30, 2), 
             "27% ÁFA 61.20.30": round(t_61_20_30_27, 2), 
-            "51.21.24 : 27%-os nettó (Ft)": round(t_51_21_24, 2), 
-            "27% ÁFA 51.21.24": round(t_51_21_24_27, 2), 
+            "52.21.24 : 27%-os nettó (Ft)": round(t_52_21_24, 2), 
+            "27% ÁFA 52.21.24": round(t_52_21_24_27, 2), 
             "62.09.20 : 27%-os nettó (Ft)": round(t_62_09_20, 2),
             "27% ÁFA 62.09.20": round(t_62_09_20_27, 2),
             "82.99.19 : 27%-os nettó (Ft)": round(t_82_99_19, 2), 
@@ -440,8 +440,8 @@ def export_to_excel(fajlnev, kimenet_fajlnev="telekom_szamla_osszesito.xlsx"):
             "27% ÁFA Összesített": round(sum_3_27, 2), 
             "61.20.30 : 27%-os nettó (Ft)": 0.0, 
             "27% ÁFA 61.20.30": 0.0, 
-            "51.21.24 : 27%-os nettó (Ft)": 0.0, 
-            "27% ÁFA 51.21.24": 0.0, 
+            "52.21.24 : 27%-os nettó (Ft)": 0.0, 
+            "27% ÁFA 52.21.24": 0.0, 
             "62.09.20 : 27%-os nettó (Ft)": 0.0,
             "27% ÁFA 62.09.20": 0.0,
             "82.99.19 : 27%-os nettó (Ft)": 0.0, 
